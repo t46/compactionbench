@@ -45,14 +45,24 @@ def score(gold: str, response: str) -> bool:
     return nums == {gold}
 
 
-def run_policy(engine: Engine, items, policy: str) -> float:
+def run_policy(engine: Engine, items, policy: str) -> tuple[float, float, float]:
+    """Return (accuracy, mean_kept_lines, mean_prompt_chars) over the items.
+
+    The two budget terms make the compaction cost explicit: a policy that "wins"
+    only by keeping more context is not a compaction win.
+    """
     correct = 0
+    kept_lines = 0
+    prompt_chars = 0
     for it in items:
-        messages, _info = apply_policy(it, policy)
+        messages, info = apply_policy(it, policy)
+        kept_lines += info["kept_lines"]
+        prompt_chars += info["prompt_chars"]
         resp = engine.chat(messages)
         if score(it.answer, resp):
             correct += 1
-    return correct / len(items) if items else 0.0
+    n = len(items) or 1
+    return correct / n, kept_lines / n, prompt_chars / n
 
 
 def _mean(xs: list[float]) -> float:
@@ -115,9 +125,11 @@ def main() -> int:
         )
         accs = {}
         for p in policies:
-            accs[p] = run_policy(engine, items, p)
+            accs[p], kl, pc = run_policy(engine, items, p)
             metrics[key(p)] = accs[p]
-            print(f"[{p}] acc={accs[p]:.3f}", flush=True)
+            metrics[f"keptlines_{re.sub(r'[^a-z0-9]+', '_', p.lower())}"] = round(kl, 2)
+            metrics[f"promptchars_{re.sub(r'[^a-z0-9]+', '_', p.lower())}"] = round(pc, 1)
+            print(f"[{p}] acc={accs[p]:.3f} keptlines={kl:.1f} chars={pc:.0f}", flush=True)
         if "drop_distractors" in accs and "full" in accs:
             metrics["ideal_compaction_gain"] = accs["drop_distractors"] - accs["full"]
         metrics["n_distractors"] = args.n_distractors
@@ -125,6 +137,9 @@ def main() -> int:
         depths = [float(x) for x in args.needle_depths.split(",") if x.strip()]
         # acc[p][depth] = list of per-seed accuracies
         acc: dict = {p: {z: [] for z in depths} for p in policies}
+        # Budget axis (depth/seed-invariant by construction for most policies):
+        # accumulate mean kept-lines and prompt-chars per policy across all cells.
+        budget: dict = {p: {"kl": [], "pc": []} for p in policies}
         for sd in seeds:
             for z in depths:
                 items = make_dataset(
@@ -135,9 +150,11 @@ def main() -> int:
                     needle_depth=z,
                 )
                 for p in policies:
-                    a = run_policy(engine, items, p)
+                    a, kl, pc = run_policy(engine, items, p)
                     acc[p][z].append(a)
-                    print(f"[seed={sd}][z={z}][{p}] acc={a:.3f}", flush=True)
+                    budget[p]["kl"].append(kl)
+                    budget[p]["pc"].append(pc)
+                    print(f"[seed={sd}][z={z}][{p}] acc={a:.3f} keptlines={kl:.1f}", flush=True)
 
         # Aggregate: per-depth mean over seeds, depth-balanced headline, seed-std.
         balanced = {}
@@ -153,6 +170,18 @@ def main() -> int:
             metrics[f"seedstd_{re.sub(r'[^a-z0-9]+', '_', p.lower())}_balanced"] = round(
                 _std(per_seed_balanced), 4
             )
+
+        # Budget axis: mean kept-lines and prompt-chars per policy, plus the
+        # fraction of full-context budget retained (the charter's "≤50% budget"
+        # bar is read directly off budgetfrac_<p>).
+        full_chars = _mean(budget["full"]["pc"]) if "full" in budget else 0.0
+        for p in policies:
+            ptag = re.sub(r"[^a-z0-9]+", "_", p.lower())
+            mean_pc = _mean(budget[p]["pc"])
+            metrics[f"keptlines_{ptag}"] = round(_mean(budget[p]["kl"]), 2)
+            metrics[f"promptchars_{ptag}"] = round(mean_pc, 1)
+            if full_chars > 0:
+                metrics[f"budgetfrac_{ptag}"] = round(mean_pc / full_chars, 4)
 
         # Headline comparisons (depth-balanced).
         if "drop_distractors" in balanced and "full" in balanced:
@@ -170,6 +199,18 @@ def main() -> int:
             metrics["verbose_penalty"] = round(
                 balanced["verbose_instruction"] - balanced["full"], 4
             )
+
+        # HEADLINE (charter deliverable #2): does a HONEST recoverable-compaction
+        # policy beat the fair truncation incumbent? +delta at near-equal-or-lower
+        # budget = a real win. Baseline = keep_last_k:8 (fair, depth-balanced).
+        base = "keep_last_k:8"
+        for pol, mname in (
+            ("ledger+refetch", "recoverable_gain_refetch_8"),
+            ("ledger_state", "recoverable_gain_ledger_state_8"),
+            ("ledger", "recoverable_gain_ledger_8"),
+        ):
+            if pol in balanced and base in balanced:
+                metrics[mname] = round(balanced[pol] - balanced[base], 4)
         metrics["n_distractors"] = args.n_distractors
         metrics["n_seeds"] = len(seeds)
         metrics["n_depths"] = len(depths)
