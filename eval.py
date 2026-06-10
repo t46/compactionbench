@@ -66,53 +66,73 @@ def main() -> int:
         default="full,drop_distractors,drop_relevant",
         help="comma-separated policy names",
     )
+    ap.add_argument(
+        "--sweep-distractors",
+        default="",
+        help="comma-separated n_distractors values; if set, sweeps context length "
+        "and emits acc_<policy>_d<N> keys instead of single-config keys",
+    )
     args = ap.parse_args()
 
-    items = make_dataset(
-        base_seed=args.base_seed,
-        n_items=args.n_items,
-        n_distractors=args.n_distractors,
-        n_reassign=args.n_reassign,
-    )
     policies = [p.strip() for p in args.policies.split(",") if p.strip()]
 
-    engine = Engine(model=args.model, seed=args.engine_seed)
-    per_policy = {}
-    for p in policies:
-        res = run_policy(engine, items, p)
-        per_policy[p] = res
-        print(
-            f"[{p}] acc={res['accuracy']:.3f} ({res['correct']}/{res['n']}) "
-            f"mean_resp_chars={res['mean_resp_chars']:.1f}",
-            flush=True,
-        )
-
-    # Flat numeric metrics (harness reads these). Sanitize policy names for keys.
     def key(p: str) -> str:
         return "acc_" + re.sub(r"[^a-z0-9]+", "_", p.lower())
 
-    metrics: dict = {key(p): per_policy[p]["accuracy"] for p in policies}
-    if "full" in per_policy and "drop_relevant" in per_policy:
-        # Headroom: how much accuracy depends on the answer-bearing context.
-        metrics["headroom_full_minus_droprelevant"] = (
-            per_policy["full"]["accuracy"] - per_policy["drop_relevant"]["accuracy"]
+    engine = Engine(model=args.model, seed=args.engine_seed)
+    metrics: dict = {}
+    detail: dict = {}
+
+    if args.sweep_distractors.strip():
+        lengths = [int(x) for x in args.sweep_distractors.split(",") if x.strip()]
+        for nd in lengths:
+            items = make_dataset(
+                base_seed=args.base_seed,
+                n_items=args.n_items,
+                n_distractors=nd,
+                n_reassign=args.n_reassign,
+            )
+            for p in policies:
+                res = run_policy(engine, items, p)
+                detail[f"{p}_d{nd}"] = res
+                metrics[f"{key(p)}_d{nd}"] = res["accuracy"]
+                print(
+                    f"[d={nd}][{p}] acc={res['accuracy']:.3f} "
+                    f"({res['correct']}/{res['n']})",
+                    flush=True,
+                )
+    else:
+        items = make_dataset(
+            base_seed=args.base_seed,
+            n_items=args.n_items,
+            n_distractors=args.n_distractors,
+            n_reassign=args.n_reassign,
         )
-    if "drop_distractors" in per_policy and "full" in per_policy:
-        # Ideal-compaction gap: positive => compaction HELPS (less distraction).
-        metrics["ideal_compaction_gain"] = (
-            per_policy["drop_distractors"]["accuracy"] - per_policy["full"]["accuracy"]
-        )
+        for p in policies:
+            res = run_policy(engine, items, p)
+            detail[p] = res
+            metrics[key(p)] = res["accuracy"]
+            print(
+                f"[{p}] acc={res['accuracy']:.3f} ({res['correct']}/{res['n']}) "
+                f"mean_resp_chars={res['mean_resp_chars']:.1f}",
+                flush=True,
+            )
+        if "full" in detail and "drop_relevant" in detail:
+            # Headroom: how much accuracy depends on the answer-bearing context.
+            metrics["headroom_full_minus_droprelevant"] = (
+                detail["full"]["accuracy"] - detail["drop_relevant"]["accuracy"]
+            )
+        if "drop_distractors" in detail and "full" in detail:
+            # Ideal-compaction gap: positive => compaction HELPS (less distraction).
+            metrics["ideal_compaction_gain"] = (
+                detail["drop_distractors"]["accuracy"] - detail["full"]["accuracy"]
+            )
+        metrics["n_distractors"] = args.n_distractors
+
     metrics["usage_calls"] = engine.usage.calls
     metrics["n_items"] = args.n_items
-    metrics["n_distractors"] = args.n_distractors
 
-    out = {
-        "metrics": metrics,
-        "per_policy": per_policy,
-        "config": vars(args),
-        "usage": engine.usage.as_dict(),
-    }
-    print(json.dumps(out["metrics"], indent=2), flush=True)
+    print(json.dumps(metrics, indent=2), flush=True)
 
     path = os.environ.get("AAD_METRICS_PATH")
     if path:
