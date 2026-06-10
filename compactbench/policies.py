@@ -5,22 +5,28 @@ A policy decides which context survives into the prompt. This is where
 TYPE to measure its marginal value; recency/threshold baselines mimic the
 lossy threshold-summarization that production harnesses use today.
 
-Every policy returns (messages, kept_kinds) where messages is an
-OpenAI-style [{role, content}] list. A generic fallback system prompt is used
-when the task instruction is dropped, so the model is still told to answer —
-isolating the value of the SPECIFIC instruction rather than of "any system
-prompt at all".
+Every policy returns (messages, info). To isolate COMPACTION quality from prompt
+WORDING, all compaction policies use ONE fixed terse system instruction (session
+1 found the 3B is highly sensitive to instruction phrasing — a verbose task
+instruction depressed accuracy ~0.30 absolute, which would otherwise contaminate
+every policy that carried it). The verbose-vs-terse wording effect is measured
+separately by the explicit `verbose_instruction` policy.
 """
 
 from __future__ import annotations
 
 from .tasks.stateful import DISTRACTOR, INSTRUCTION, QUERY, RELEVANT, Item
 
-GENERIC_SYSTEM = "Answer the question using the session log below. Reply with only the answer."
+# Fixed, terse, COMPLETE instruction used by every compaction policy. Terse but
+# states the rule (most-recent-wins) so the task is well-posed; held constant so
+# we measure compaction, not wording.
+TERSE_SYSTEM = (
+    "Track register values from the log. A register's current value is its most "
+    "recent assignment. Answer with only the number."
+)
 
 
-def _assemble(instruction_text: str | None, log_texts: list[str], query_text: str) -> list[dict]:
-    system = instruction_text if instruction_text is not None else GENERIC_SYSTEM
+def _assemble(system: str, log_texts: list[str], query_text: str) -> list[dict]:
     log_block = "\n".join(f"- {t}" for t in log_texts)
     user = f"Session log:\n{log_block}\n\n{query_text}"
     return [
@@ -31,31 +37,31 @@ def _assemble(instruction_text: str | None, log_texts: list[str], query_text: st
 
 def apply_policy(item: Item, policy: str) -> tuple[list[dict], dict]:
     """Return (messages, info). `policy` is a name, optionally 'keep_last_k:K'."""
-    instr = next((s.text for s in item.segments if s.kind == INSTRUCTION), None)
+    verbose = next((s.text for s in item.segments if s.kind == INSTRUCTION), None)
     query = next(s.text for s in item.segments if s.kind == QUERY)
     log = [s for s in item.segments if s.kind in (RELEVANT, DISTRACTOR)]
 
-    keep_instr = instr
+    system = TERSE_SYSTEM
     if policy == "full":
         kept = log
     elif policy == "drop_distractors":  # lossless ideal compaction
         kept = [s for s in log if s.kind == RELEVANT]
     elif policy == "drop_relevant":  # ablate answer-bearing info (necessity check)
         kept = [s for s in log if s.kind == DISTRACTOR]
-    elif policy == "drop_instruction":
-        keep_instr = None
+    elif policy == "verbose_instruction":  # wording ablation: full log, verbose system
         kept = log
+        system = verbose if verbose is not None else TERSE_SYSTEM
     elif policy.startswith("keep_last_k:"):
         k = int(policy.split(":", 1)[1])
         kept = log[-k:] if k > 0 else []
     else:
         raise ValueError(f"unknown policy: {policy}")
 
-    messages = _assemble(keep_instr, [s.text for s in kept], query)
+    messages = _assemble(system, [s.text for s in kept], query)
     info = {
         "policy": policy,
         "kept_lines": len(kept),
         "answer_retained": any(s.kind == RELEVANT and s.is_answer for s in kept),
-        "instruction_retained": keep_instr is not None,
+        "system_is_verbose": system != TERSE_SYSTEM,
     }
     return messages, info

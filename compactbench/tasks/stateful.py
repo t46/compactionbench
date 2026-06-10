@@ -78,6 +78,7 @@ def make_item(
     n_distractors: int = 40,
     n_distractor_vars: int = 8,
     filler_ratio: float = 0.5,
+    needle_depth: float | None = None,
 ) -> Item:
     """Generate one StatefulQA item.
 
@@ -87,6 +88,15 @@ def make_item(
     n_distractor_vars: pool of non-target registers used by distractor assigns.
     filler_ratio: fraction of distractor turns that are pure filler vs decoy
         assignments to other registers.
+    needle_depth: CONTROLLED position of the answer-bearing assignment as a
+        fraction in [0, 1] of the log (0 = front, 1 = back). The decoy target
+        assignments are placed uniformly at random BEFORE it (so the answer is
+        always the most-recent assignment). If None, the answer position is
+        left to the legacy end-biased random placement (kept for reproducibility
+        of session-1 runs). Making this a controlled variable is what turns the
+        recency/truncation baseline into a FAIR, beatable incumbent: at depth 0
+        truncation drops the answer, at depth 1 it retains it; a depth-balanced
+        score no longer rewards end-bias.
     """
     rng = random.Random(seed)
     names = VAR_NAMES[:]
@@ -111,19 +121,40 @@ def make_item(
             dn = rng.choice(distractor_names)
             distractors.append(Segment(DISTRACTOR, f"register {dn} is now {_val(rng)}"))
 
-    # Interleave relevant assignments among distractors, preserving relevant
-    # ORDER (so the answer-bearing one stays last among the relevant set), and
-    # ensure the answer-bearing assignment is NOT the very last line overall
-    # (otherwise pure recency without reading would solve it).
-    log = distractors[:]
-    # choose n_reassign insertion positions in [0, len(log)] in increasing order
-    # (repeats allowed so this works even when distractors are few/zero).
-    positions = sorted(rng.randint(0, len(log)) for _ in range(n_reassign))
-    for offset, (pos, seg) in enumerate(zip(positions, relevant)):
-        log.insert(pos + offset, seg)
-    # If the answer-bearing segment ended up last, append one filler after it.
-    if log[-1].is_answer:
-        log.append(Segment(DISTRACTOR, rng.choice(FILLER_TEMPLATES)))
+    if needle_depth is None:
+        # Legacy end-biased placement (session-1 reproducibility).
+        log = distractors[:]
+        positions = sorted(rng.randint(0, len(log)) for _ in range(n_reassign))
+        for offset, (pos, seg) in enumerate(zip(positions, relevant)):
+            log.insert(pos + offset, seg)
+        if log[-1].is_answer:
+            log.append(Segment(DISTRACTOR, rng.choice(FILLER_TEMPLATES)))
+        answer_index = next(i for i, s in enumerate(log) if s.is_answer)
+    else:
+        # Controlled placement: answer at a target depth, decoys strictly before it.
+        total = n_distractors + n_reassign
+        d = min(max(needle_depth, 0.0), 1.0)
+        answer_index = round(d * (total - 1))
+        # Need at least n_reassign-1 slots before the answer for the decoys, and
+        # at least one line AFTER it (so pure recency cannot solve without reading).
+        answer_index = max(answer_index, n_reassign - 1)
+        answer_index = min(answer_index, total - 2)
+        decoy = relevant[:-1]
+        ans_seg = relevant[-1]
+        # Distinct positions in [0, answer_index) for the decoys.
+        decoy_positions = sorted(rng.sample(range(answer_index), len(decoy)))
+        log: list[Segment] = []
+        di = 0  # index into distractors
+        ci = 0  # index into decoy positions
+        for idx in range(total):
+            if idx == answer_index:
+                log.append(ans_seg)
+            elif ci < len(decoy) and idx == decoy_positions[ci]:
+                log.append(decoy[ci])
+                ci += 1
+            else:
+                log.append(distractors[di])
+                di += 1
 
     segments = (
         [Segment(INSTRUCTION, INSTRUCTION_TEXT)]
@@ -139,6 +170,9 @@ def make_item(
             "n_reassign": n_reassign,
             "n_distractors": n_distractors,
             "n_log_lines": len(log),
+            "needle_depth": needle_depth,
+            # Observed fractional depth of the answer line in the final log.
+            "answer_depth_frac": answer_index / (len(log) - 1) if len(log) > 1 else 0.0,
         },
     )
 

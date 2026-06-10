@@ -5,8 +5,19 @@ or more context policies, scores exact-match, and writes numeric metrics to
 $AAD_METRICS_PATH. Bootstraps its own environment via uv; needs only a running
 ollama with the model pulled.
 
+Two modes:
+  * default single-config: --policies over one (n_distractors, needle_depth).
+  * depth-stratified panel (--needle-depths set): for each policy, sweeps the
+    CONTROLLED answer depth and averages over --base-seeds, emitting per-depth
+    means (acc_<p>_z<NN>), a depth-balanced headline (acc_<p>_balanced), and a
+    cross-seed stability std (seedstd_<p>_balanced). This is the protocol that
+    de-confounds the recency/truncation baseline (fair across depths) and holds
+    the instruction constant (wording isolated to the verbose_instruction policy).
+
 Usage:
-  uv run --frozen python eval.py --n-items 50 --policies full,drop_distractors,drop_relevant
+  uv run --frozen python eval.py --n-items 25 \
+    --policies full,drop_distractors,drop_relevant,keep_last_k:8,keep_last_k:16,verbose_instruction \
+    --needle-depths 0,0.25,0.5,0.75,1.0 --base-seeds 1000,2000,3000 --n-distractors 40
 """
 
 from __future__ import annotations
@@ -34,100 +45,134 @@ def score(gold: str, response: str) -> bool:
     return nums == {gold}
 
 
-def run_policy(engine: Engine, items, policy: str) -> dict:
+def run_policy(engine: Engine, items, policy: str) -> float:
     correct = 0
-    resp_chars = 0
     for it in items:
         messages, _info = apply_policy(it, policy)
         resp = engine.chat(messages)
-        resp_chars += len(resp)
         if score(it.answer, resp):
             correct += 1
-    n = len(items)
-    return {
-        "policy": policy,
-        "n": n,
-        "accuracy": correct / n if n else 0.0,
-        "correct": correct,
-        "mean_resp_chars": resp_chars / n if n else 0.0,
-    }
+    return correct / len(items) if items else 0.0
+
+
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+def _std(xs: list[float]) -> float:
+    if len(xs) < 2:
+        return 0.0
+    m = _mean(xs)
+    return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
+
+
+def key(p: str) -> str:
+    return "acc_" + re.sub(r"[^a-z0-9]+", "_", p.lower())
+
+
+def depth_tag(z: float) -> str:
+    return f"z{round(z * 100):d}"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n-items", type=int, default=50)
+    ap.add_argument("--n-items", type=int, default=25)
     ap.add_argument("--base-seed", type=int, default=1000)
+    ap.add_argument("--base-seeds", default="", help="comma-separated; overrides --base-seed when set")
     ap.add_argument("--model", default="qwen2.5:3b-instruct")
     ap.add_argument("--engine-seed", type=int, default=0)
     ap.add_argument("--n-distractors", type=int, default=40)
     ap.add_argument("--n-reassign", type=int, default=4)
     ap.add_argument(
         "--policies",
-        default="full,drop_distractors,drop_relevant",
+        default="full,drop_distractors,drop_relevant,keep_last_k:8,keep_last_k:16,verbose_instruction",
         help="comma-separated policy names",
     )
     ap.add_argument(
-        "--sweep-distractors",
+        "--needle-depths",
         default="",
-        help="comma-separated n_distractors values; if set, sweeps context length "
-        "and emits acc_<policy>_d<N> keys instead of single-config keys",
+        help="comma-separated controlled answer depths in [0,1]; enables the "
+        "depth-stratified multi-seed panel mode",
     )
     args = ap.parse_args()
 
     policies = [p.strip() for p in args.policies.split(",") if p.strip()]
-
-    def key(p: str) -> str:
-        return "acc_" + re.sub(r"[^a-z0-9]+", "_", p.lower())
-
+    seeds = (
+        [int(s) for s in args.base_seeds.split(",") if s.strip()]
+        if args.base_seeds.strip()
+        else [args.base_seed]
+    )
     engine = Engine(model=args.model, seed=args.engine_seed)
     metrics: dict = {}
-    detail: dict = {}
 
-    if args.sweep_distractors.strip():
-        lengths = [int(x) for x in args.sweep_distractors.split(",") if x.strip()]
-        for nd in lengths:
-            items = make_dataset(
-                base_seed=args.base_seed,
-                n_items=args.n_items,
-                n_distractors=nd,
-                n_reassign=args.n_reassign,
-            )
-            for p in policies:
-                res = run_policy(engine, items, p)
-                detail[f"{p}_d{nd}"] = res
-                metrics[f"{key(p)}_d{nd}"] = res["accuracy"]
-                print(
-                    f"[d={nd}][{p}] acc={res['accuracy']:.3f} "
-                    f"({res['correct']}/{res['n']})",
-                    flush=True,
-                )
-    else:
+    if not args.needle_depths.strip():
+        # Single-config mode (legacy): one (n_distractors, random depth) cell.
         items = make_dataset(
-            base_seed=args.base_seed,
+            base_seed=seeds[0],
             n_items=args.n_items,
             n_distractors=args.n_distractors,
             n_reassign=args.n_reassign,
         )
+        accs = {}
         for p in policies:
-            res = run_policy(engine, items, p)
-            detail[p] = res
-            metrics[key(p)] = res["accuracy"]
-            print(
-                f"[{p}] acc={res['accuracy']:.3f} ({res['correct']}/{res['n']}) "
-                f"mean_resp_chars={res['mean_resp_chars']:.1f}",
-                flush=True,
+            accs[p] = run_policy(engine, items, p)
+            metrics[key(p)] = accs[p]
+            print(f"[{p}] acc={accs[p]:.3f}", flush=True)
+        if "drop_distractors" in accs and "full" in accs:
+            metrics["ideal_compaction_gain"] = accs["drop_distractors"] - accs["full"]
+        metrics["n_distractors"] = args.n_distractors
+    else:
+        depths = [float(x) for x in args.needle_depths.split(",") if x.strip()]
+        # acc[p][depth] = list of per-seed accuracies
+        acc: dict = {p: {z: [] for z in depths} for p in policies}
+        for sd in seeds:
+            for z in depths:
+                items = make_dataset(
+                    base_seed=sd,
+                    n_items=args.n_items,
+                    n_distractors=args.n_distractors,
+                    n_reassign=args.n_reassign,
+                    needle_depth=z,
+                )
+                for p in policies:
+                    a = run_policy(engine, items, p)
+                    acc[p][z].append(a)
+                    print(f"[seed={sd}][z={z}][{p}] acc={a:.3f}", flush=True)
+
+        # Aggregate: per-depth mean over seeds, depth-balanced headline, seed-std.
+        balanced = {}
+        for p in policies:
+            for z in depths:
+                metrics[f"{key(p)}_{depth_tag(z)}"] = round(_mean(acc[p][z]), 4)
+            # Per-seed balanced acc = mean over depths within that seed.
+            per_seed_balanced = [
+                _mean([acc[p][z][i] for z in depths]) for i in range(len(seeds))
+            ]
+            balanced[p] = _mean(per_seed_balanced)
+            metrics[f"{key(p)}_balanced"] = round(balanced[p], 4)
+            metrics[f"seedstd_{re.sub(r'[^a-z0-9]+', '_', p.lower())}_balanced"] = round(
+                _std(per_seed_balanced), 4
             )
-        if "full" in detail and "drop_relevant" in detail:
-            # Headroom: how much accuracy depends on the answer-bearing context.
-            metrics["headroom_full_minus_droprelevant"] = (
-                detail["full"]["accuracy"] - detail["drop_relevant"]["accuracy"]
+
+        # Headline comparisons (depth-balanced).
+        if "drop_distractors" in balanced and "full" in balanced:
+            metrics["ideal_compaction_gain_balanced"] = round(
+                balanced["drop_distractors"] - balanced["full"], 4
             )
-        if "drop_distractors" in detail and "full" in detail:
-            # Ideal-compaction gap: positive => compaction HELPS (less distraction).
-            metrics["ideal_compaction_gain"] = (
-                detail["drop_distractors"]["accuracy"] - detail["full"]["accuracy"]
+        # Does recency-truncation still beat ideal compaction once depth is fair?
+        # Positive => truncation still wins (confound persists); <=0 => fixed.
+        for kk in ("keep_last_k:8", "keep_last_k:16"):
+            if kk in balanced and "drop_distractors" in balanced:
+                metrics[f"truncation_minus_ideal_{kk.split(':')[1]}"] = round(
+                    balanced[kk] - balanced["drop_distractors"], 4
+                )
+        if "verbose_instruction" in balanced and "full" in balanced:
+            metrics["verbose_penalty"] = round(
+                balanced["verbose_instruction"] - balanced["full"], 4
             )
         metrics["n_distractors"] = args.n_distractors
+        metrics["n_seeds"] = len(seeds)
+        metrics["n_depths"] = len(depths)
 
     metrics["usage_calls"] = engine.usage.calls
     metrics["n_items"] = args.n_items
