@@ -117,7 +117,8 @@ def make_item(
     # (otherwise pure recency without reading would solve it).
     log = distractors[:]
     # choose n_reassign insertion positions in [0, len(log)] in increasing order
-    positions = sorted(rng.sample(range(len(log) + 1), n_reassign))
+    # (repeats allowed so this works even when distractors are few/zero).
+    positions = sorted(rng.randint(0, len(log)) for _ in range(n_reassign))
     for offset, (pos, seg) in enumerate(zip(positions, relevant)):
         log.insert(pos + offset, seg)
     # If the answer-bearing segment ended up last, append one filler after it.
