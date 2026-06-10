@@ -1,0 +1,13 @@
+[project]
+name = "compactbench"
+version = "0.1.0"
+description = "CompactionBench: measuring context-rot and recoverable compaction (bet-0003)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+]
+
+# Standalone uv workspace root — must NOT join the parent (kernel) workspace.
+[tool.uv.workspace]
+members = []
