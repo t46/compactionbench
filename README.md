@@ -5,9 +5,16 @@ Two task families: **v0 StatefulQA** (answer = most-recent value) and **v1
 AccumulatorQA** (answer = cumulative sum). v1 exists because a most-recent-wins
 ledger dedup near-solves v0 (1.000); v1 makes the answer a total no single line
 holds, so the benchmark discriminates compaction operators by the **state algebra**
-they respect. Seven verified results across two models (3b protocols p-d3c4bf50,
+they respect. Verified results across two models (3b protocols p-d3c4bf50,
 p-d816ff49, p-8e96fc78, p-9fd9858e; 7b cross-model protocols p-3ad438f7,
-p-b7a62692, p-8a283782).
+p-b7a62692, p-8a283782, p-6a21adb3).
+
+**Start here:** [`FINDINGS.md`](FINDINGS.md) — paper-style write-up of the four
+mechanistic findings. **Reproduce everything:** `./reproduce.sh` (both models;
+`./reproduce.sh 3b` for the cheap half). **Frozen splits:**
+`frozen/splits.json` pins SHA256 of every eval cell (the benchmark is
+procedurally generated, so generator+seed+config IS the split);
+`scripts/freeze_splits.py --check` detects any drift.
 
 ## Task: StatefulQA (v0, `--task stateful`)
 A long "session log" of typed segments (instruction / relevant state / distractors),
@@ -80,7 +87,7 @@ the state's algebra.** budgetfrac = mean prompt-chars / full-context prompt-char
 | v0 refetch_position_effect | +0.30 | **+0.12** | p-b7a62692 |
 | v1 accum_fold_minus_dedup | +0.996 | **+0.992** | p-8a283782 |
 | v1 accum_recoverable_gain_refetch_8 | +0.125 | +0.275 | (secondary) |
-| v1 refetch_position_effect | −0.03 | −0.146 | (secondary) |
+| v1 refetch_position_effect | −0.03 | −0.146 | p-6a21adb3 |
 
 All signs survive scale. Two mechanistic refinements:
 1. **Recovery gains GROW with scale** — truncation's loss is positional/
