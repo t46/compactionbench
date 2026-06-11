@@ -30,7 +30,8 @@ import sys
 
 from compactbench.engine import Engine, strip_think
 from compactbench.policies import apply_policy
-from compactbench.tasks.stateful import make_dataset
+from compactbench.tasks import accumulate as accumulate_task
+from compactbench.tasks import stateful as stateful_task
 
 INT_RE = re.compile(r"-?\d+")
 
@@ -45,7 +46,7 @@ def score(gold: str, response: str) -> bool:
     return nums == {gold}
 
 
-def run_policy(engine: Engine, items, policy: str) -> tuple[float, float, float]:
+def run_policy(engine: Engine, items, policy: str, task: str = "stateful") -> tuple[float, float, float]:
     """Return (accuracy, mean_kept_lines, mean_prompt_chars) over the items.
 
     The two budget terms make the compaction cost explicit: a policy that "wins"
@@ -55,7 +56,7 @@ def run_policy(engine: Engine, items, policy: str) -> tuple[float, float, float]
     kept_lines = 0
     prompt_chars = 0
     for it in items:
-        messages, info = apply_policy(it, policy)
+        messages, info = apply_policy(it, policy, task=task)
         kept_lines += info["kept_lines"]
         prompt_chars += info["prompt_chars"]
         resp = engine.chat(messages)
@@ -92,7 +93,14 @@ def main() -> int:
     ap.add_argument("--model", default="qwen2.5:3b-instruct")
     ap.add_argument("--engine-seed", type=int, default=0)
     ap.add_argument("--n-distractors", type=int, default=40)
-    ap.add_argument("--n-reassign", type=int, default=4)
+    ap.add_argument("--n-reassign", type=int, default=4, help="stateful: target reassignments")
+    ap.add_argument("--n-ops", type=int, default=5, help="accumulate: target ops (1 set + deltas)")
+    ap.add_argument(
+        "--task",
+        default="stateful",
+        choices=["stateful", "accumulate"],
+        help="stateful (v0, most-recent answer) or accumulate (v1, cumulative-sum answer)",
+    )
     ap.add_argument(
         "--policies",
         default="full,drop_distractors,drop_relevant,keep_last_k:8,keep_last_k:16,verbose_instruction",
@@ -115,17 +123,27 @@ def main() -> int:
     engine = Engine(model=args.model, seed=args.engine_seed)
     metrics: dict = {}
 
+    # Route to the task family. Both expose make_dataset(base_seed, n_items,
+    # n_distractors, needle_depth, ...); only the task-specific op-count kwarg
+    # differs (n_reassign for stateful, n_ops for accumulate).
+    if args.task == "accumulate":
+        make_dataset = accumulate_task.make_dataset
+        op_kwargs = {"n_ops": args.n_ops}
+    else:
+        make_dataset = stateful_task.make_dataset
+        op_kwargs = {"n_reassign": args.n_reassign}
+
     if not args.needle_depths.strip():
         # Single-config mode (legacy): one (n_distractors, random depth) cell.
         items = make_dataset(
             base_seed=seeds[0],
             n_items=args.n_items,
             n_distractors=args.n_distractors,
-            n_reassign=args.n_reassign,
+            **op_kwargs,
         )
         accs = {}
         for p in policies:
-            accs[p], kl, pc = run_policy(engine, items, p)
+            accs[p], kl, pc = run_policy(engine, items, p, task=args.task)
             metrics[key(p)] = accs[p]
             metrics[f"keptlines_{re.sub(r'[^a-z0-9]+', '_', p.lower())}"] = round(kl, 2)
             metrics[f"promptchars_{re.sub(r'[^a-z0-9]+', '_', p.lower())}"] = round(pc, 1)
@@ -146,11 +164,11 @@ def main() -> int:
                     base_seed=sd,
                     n_items=args.n_items,
                     n_distractors=args.n_distractors,
-                    n_reassign=args.n_reassign,
                     needle_depth=z,
+                    **op_kwargs,
                 )
                 for p in policies:
-                    a, kl, pc = run_policy(engine, items, p)
+                    a, kl, pc = run_policy(engine, items, p, task=args.task)
                     acc[p][z].append(a)
                     budget[p]["kl"].append(kl)
                     budget[p]["pc"].append(pc)
@@ -209,9 +227,27 @@ def main() -> int:
             ("ledger+refetch_inplace", "recoverable_gain_refetch_inplace_8"),
             ("ledger_state", "recoverable_gain_ledger_state_8"),
             ("ledger", "recoverable_gain_ledger_8"),
+            ("ledger_accumulate", "recoverable_gain_ledger_accumulate_8"),
         ):
             if pol in balanced and base in balanced:
                 metrics[mname] = round(balanced[pol] - balanced[base], 4)
+        # AccumulatorQA (v1) named headlines. The CONSERVATIVE headline is refetch
+        # (recovers all target ops; model does the arithmetic). dedup_penalty
+        # quantifies the v1 point: most-recent-wins dedup, the v0 near-solver, now
+        # FAILS — it should be <= 0 (no better than truncation, often worse).
+        if args.task == "accumulate":
+            if "ledger+refetch" in balanced and base in balanced:
+                metrics["accum_recoverable_gain_refetch_8"] = round(
+                    balanced["ledger+refetch"] - balanced[base], 4
+                )
+            if "ledger_state" in balanced and base in balanced:
+                metrics["accum_dedup_penalty_vs_truncation"] = round(
+                    balanced["ledger_state"] - balanced[base], 4
+                )
+            if "ledger_accumulate" in balanced and "ledger+refetch" in balanced:
+                metrics["accum_fold_minus_refetch"] = round(
+                    balanced["ledger_accumulate"] - balanced["ledger+refetch"], 4
+                )
         # RETRIEVAL-POSITION effect (anomaly test): same content + budget, only
         # the re-insertion slot differs. >0 => placing refetched lines in the
         # most-recent slot (adjacent to query) helps => retrieval ORDER is a

@@ -34,6 +34,31 @@ TERSE_SYSTEM = (
 # compactor must classify the surface text itself, which is what this does.
 ASSIGN_RE = re.compile(r"register\s+(\w+)\s+is\s+now\s+(-?\d+)")
 
+# AccumulatorQA (v1) surface grammar: a register is SET to a base, or INCREASED /
+# DECREASED by a delta. Honest accumulate policies use ONLY this pattern and the
+# query text — never the ground-truth `kind`. `set` lines carry a base value; the
+# current value of a register = its last base + every later signed delta.
+OP_RE = re.compile(
+    r"register\s+(\w+)\s+(?:is\s+set\s+to|(increased)|(decreased))\s+(?:by\s+)?(-?\d+)"
+)
+
+# Any line that MENTIONS a register (the honest re-fetch key: pull every line
+# referencing the queried target, regardless of op form). Matches both the v1 op
+# grammar and the v0 "is now" grammar via the shared "register <name>" prefix.
+REG_MENTION_RE = re.compile(r"register\s+(\w+)\b")
+
+
+def _parse_op(text: str) -> tuple[str, int] | None:
+    """Parse an AccumulatorQA op line into (register, signed_contribution).
+    `set` -> (+base); `increased by d` -> (+d); `decreased by d` -> (-d)."""
+    m = OP_RE.search(text)
+    if not m:
+        return None
+    reg, inc, dec, num = m.group(1), m.group(2), m.group(3), int(m.group(4))
+    if dec:
+        return reg, -num
+    return reg, num  # set or increase both contribute positively
+
 
 def _target_of(query_text: str) -> str | None:
     m = re.search(r"register\s+(\w+)", query_text)
@@ -49,8 +74,16 @@ def _assemble(system: str, log_texts: list[str], query_text: str) -> list[dict]:
     ]
 
 
-def apply_policy(item: Item, policy: str) -> tuple[list[dict], dict]:
-    """Return (messages, info). `policy` is a name, optionally 'keep_last_k:K'."""
+def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[dict], dict]:
+    """Return (messages, info). `policy` is a name, optionally 'keep_last_k:K'.
+
+    `task` selects the surface grammar the HONEST recoverable-compaction policies
+    parse: "stateful" (v0, "register X is now N", answer = most-recent) or
+    "accumulate" (v1, set/increase/decrease, answer = base + sum of deltas). The
+    type-ablation baselines (full / drop_distractors / drop_relevant /
+    keep_last_k / verbose_instruction) are grammar-independent and behave
+    identically for both tasks.
+    """
     verbose = next((s.text for s in item.segments if s.kind == INSTRUCTION), None)
     query = next(s.text for s in item.segments if s.kind == QUERY)
     log = [s for s in item.segments if s.kind in (RELEVANT, DISTRACTOR)]
@@ -70,26 +103,69 @@ def apply_policy(item: Item, policy: str) -> tuple[list[dict], dict]:
         kept = log[-k:] if k > 0 else []
     elif policy == "ledger":
         # HONEST analog of drop_distractors: keep lines that LOOK like register
-        # assignments (surface regex), drop pure filler. Does NOT read `kind`, so
-        # it cannot tell target-assignments from decoy-register assignments — it
-        # keeps both. An achievable approximation of ideal type-based compaction.
-        kept = [s for s in log if ASSIGN_RE.search(s.text)]
-    elif policy == "ledger_state":
-        # The charter's TYPED LEDGER OF FACTS: parse every assignment line and
-        # keep only the LATEST value per register (most-recent-wins applied
-        # generically, exactly as a stateful memory would). Drops filler AND
-        # superseded decoy assignments. Emits one synthesized line per register.
-        latest: dict[str, str] = {}
+        # operations (surface regex), drop pure filler. Does NOT read `kind`, so
+        # it cannot tell target-ops from decoy-register ops — it keeps both. An
+        # achievable approximation of ideal type-based compaction. The op grammar
+        # differs by task (assignments vs set/inc/dec).
+        op_re = OP_RE if task == "accumulate" else ASSIGN_RE
+        kept = [s for s in log if op_re.search(s.text)]
+    elif policy == "ledger_accumulate":
+        # The accumulate-task TYPED LEDGER OF FACTS (v1 analog of ledger_state):
+        # fold every op per register — `set` resets the base, increase/decrease
+        # adjust it — and emit one synthesized current-value line per register.
+        # Correct stateful-memory operator for ACCUMULATIVE state; it computes the
+        # total in-compactor, so report it as a CEILING, not the conservative
+        # headline (refetch leaves the arithmetic to the model). Honest: parses
+        # only surface op text, never `kind`.
+        totals: dict[str, int] = {}
         order: list[str] = []
         for s in log:
-            m = ASSIGN_RE.search(s.text)
-            if not m:
+            parsed = _parse_op(s.text)
+            if parsed is None:
                 continue
-            reg, val = m.group(1), m.group(2)
-            if reg not in latest:
+            reg, contrib = parsed
+            if reg not in totals:
                 order.append(reg)
-            latest[reg] = val  # later assignment overwrites = current value
-        kept_texts = [f"register {reg} is now {latest[reg]}" for reg in order]
+                totals[reg] = 0
+            # A `set` line re-bases; for simplicity (and since AccumulatorQA emits
+            # exactly one set per register, first) we additively fold — set's +base
+            # plus subsequent signed deltas yields the current value.
+            totals[reg] += contrib
+        kept_texts = [f"register {reg} is now {totals[reg]}" for reg in order]
+        messages = _assemble(system, kept_texts, query)
+        info = _info(policy, kept_texts, messages, system)
+        return messages, info
+    elif policy == "ledger_state":
+        # MOST-RECENT-WINS dedup: keep only the latest line per register. On v0
+        # (assignments) this is the correct current value and near-solves the
+        # task; on v1 (accumulate) it is a DELIBERATE failure demonstration —
+        # keeping only the last op per register discards every earlier delta, so
+        # the synthesized "current value" is wrong. Reporting it on v1 shows the
+        # benchmark now discriminates: dedup is no longer a free solver.
+        if task == "accumulate":
+            last_line: dict[str, str] = {}
+            order: list[str] = []
+            for s in log:
+                m = REG_MENTION_RE.search(s.text)
+                if not m or _parse_op(s.text) is None:
+                    continue
+                reg = m.group(1)
+                if reg not in last_line:
+                    order.append(reg)
+                last_line[reg] = s.text  # later op overwrites = keeps only latest
+            kept_texts = [last_line[reg] for reg in order]
+        else:
+            latest: dict[str, str] = {}
+            order = []
+            for s in log:
+                m = ASSIGN_RE.search(s.text)
+                if not m:
+                    continue
+                reg, val = m.group(1), m.group(2)
+                if reg not in latest:
+                    order.append(reg)
+                latest[reg] = val  # later assignment overwrites = current value
+            kept_texts = [f"register {reg} is now {latest[reg]}" for reg in order]
         messages = _assemble(system, kept_texts, query)
         info = _info(policy, kept_texts, messages, system)
         return messages, info
@@ -111,18 +187,33 @@ def apply_policy(item: Item, policy: str) -> tuple[list[dict], dict]:
         k = 8
         window = log[-k:] if k > 0 else []
         target_name = _target_of(query)
-        in_window = any(
-            (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
-            for s in window
-        )
+        dropped = log[:-k] if k > 0 else log
         refetched: list = []
-        if target_name is not None and not in_window:
-            dropped = log[:-k] if k > 0 else log
-            refetched = [
-                s
-                for s in dropped
-                if (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
-            ]
+        if task == "accumulate":
+            # COMPLETENESS recovery: the answer needs EVERY target op, so always
+            # pull all dropped lines mentioning the target (the window holds only
+            # the ops that happen to fall in the recency tail). window and dropped
+            # are disjoint, so each target op is kept exactly once -> no double
+            # count. Honest: match on the queried register name only.
+            if target_name is not None:
+                refetched = [
+                    s
+                    for s in dropped
+                    if (m := REG_MENTION_RE.search(s.text)) and m.group(1) == target_name
+                ]
+        else:
+            # v0: one assignment = the answer; re-fetch only if the window lacks
+            # any target assignment (frozen behavior).
+            in_window = any(
+                (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
+                for s in window
+            )
+            if target_name is not None and not in_window:
+                refetched = [
+                    s
+                    for s in dropped
+                    if (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
+                ]
         if policy == "ledger+refetch_inplace":
             kept = refetched + list(window)
         else:
