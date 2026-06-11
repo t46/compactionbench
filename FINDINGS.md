@@ -106,8 +106,7 @@ generator surface. Mechanistically: adjacency concentrates attention on the
 re-fetched block, which is exactly right when the query needs *one latest
 value*, and harmful when the query needs *all ops in chronological order* —
 re-injection at original positions preserves the order the fold requires. (v0
-side verified p-b7a62692; v1 side run under protocol p-6a21adb3 this session —
-status noted in the leaderboard.)
+side verified p-b7a62692; v1 side verified p-66c7e90a, r-3245d3f204.)
 
 ### 4. The compaction operator must match the state's algebra
 
@@ -160,7 +159,4 @@ prediction, not a verified claim.
 | 5 | recovery gain grows with scale | recoverable_gain_refetch_8 | +0.7833 | p-3ad438f7 | 7b |
 | 6 | adjacency placement gain (v0) | refetch_position_effect | +0.1167 | p-b7a62692 | 7b |
 | 7 | fold vs dedup (v1) | accum_fold_minus_dedup | +0.9917 | p-8a283782 | 7b |
-| 8 | adjacency *hurts* accumulate (v1) | refetch_position_effect | −0.146* | p-6a21adb3 | 7b |
-
-*\#8: registered this session; see README leaderboard for current verification
-status.*
+| 8 | adjacency *hurts* accumulate (v1) | refetch_position_effect | −0.1458 | p-66c7e90a | 7b |

@@ -35,6 +35,7 @@ run_panel() { # name model args...
   local name="$1" model="$2"; shift 2
   echo "== panel: $name (model $model) =="
   AAD_METRICS_PATH="results/${name}.json" \
+    env UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/aad-uv-cache}" \
     uv run --frozen python eval.py --model "$model" "$@"
 }
 
@@ -44,7 +45,7 @@ if [[ "$WHICH" == "all" || "$WHICH" == "3b" ]]; then
 fi
 if [[ "$WHICH" == "all" || "$WHICH" == "7b" ]]; then
   run_panel v0_7b qwen2.5:7b-instruct "${V0_ARGS[@]}"   # protocols p-3ad438f7, p-b7a62692
-  run_panel v1_7b qwen2.5:7b-instruct "${V1_ARGS[@]}"   # protocols p-8a283782, p-6a21adb3
+  run_panel v1_7b qwen2.5:7b-instruct "${V1_ARGS[@]}"   # protocols p-8a283782, p-66c7e90a
 fi
 
 echo "== headline metrics =="
@@ -64,6 +65,7 @@ EXPECTED = {
     ("v0_7b", "recoverable_gain_refetch_8"): 0.7833,
     ("v0_7b", "refetch_position_effect"): 0.1167,
     ("v1_7b", "accum_fold_minus_dedup"): 0.9917,
+    ("v1_7b", "refetch_position_effect"): -0.1458,
 }
 for panel, keys in KEYS.items():
     p = pathlib.Path(f"results/{panel}.json")

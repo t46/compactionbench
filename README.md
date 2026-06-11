@@ -7,7 +7,7 @@ ledger dedup near-solves v0 (1.000); v1 makes the answer a total no single line
 holds, so the benchmark discriminates compaction operators by the **state algebra**
 they respect. Verified results across two models (3b protocols p-d3c4bf50,
 p-d816ff49, p-8e96fc78, p-9fd9858e; 7b cross-model protocols p-3ad438f7,
-p-b7a62692, p-8a283782, p-6a21adb3).
+p-b7a62692, p-8a283782, p-66c7e90a).
 
 **Start here:** [`FINDINGS.md`](FINDINGS.md) — paper-style write-up of the four
 mechanistic findings. **Reproduce everything:** `./reproduce.sh` (both models;
@@ -87,7 +87,7 @@ the state's algebra.** budgetfrac = mean prompt-chars / full-context prompt-char
 | v0 refetch_position_effect | +0.30 | **+0.12** | p-b7a62692 |
 | v1 accum_fold_minus_dedup | +0.996 | **+0.992** | p-8a283782 |
 | v1 accum_recoverable_gain_refetch_8 | +0.125 | +0.275 | (secondary) |
-| v1 refetch_position_effect | −0.03 | −0.146 | p-6a21adb3 |
+| v1 refetch_position_effect | −0.03 | −0.146 | p-66c7e90a |
 
 All signs survive scale. Two mechanistic refinements:
 1. **Recovery gains GROW with scale** — truncation's loss is positional/
@@ -112,7 +112,7 @@ uv run --frozen python eval.py --task accumulate --n-items 16 --n-ops 3 \
   --policies full,drop_distractors,keep_last_k:8,keep_last_k:16,ledger,ledger_state,ledger+refetch,ledger+refetch_inplace,ledger_accumulate \
   --needle-depths 0,0.25,0.5,0.75,1.0 --base-seeds 1000,2000,3000 --n-distractors 40
 ```
-Cross-model (protocols p-3ad438f7 / p-b7a62692 / p-8a283782): same two commands
-with `--model qwen2.5:7b-instruct`. Requires local ollama with
+Cross-model (protocols p-3ad438f7 / p-b7a62692 / p-8a283782 / p-66c7e90a):
+same two commands with `--model qwen2.5:7b-instruct`. Requires local ollama with
 `qwen2.5:3b-instruct` (and `qwen2.5:7b-instruct` for the cross-model panels).
 Metrics → `$AAD_METRICS_PATH`.
