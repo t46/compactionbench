@@ -248,6 +248,16 @@ def main() -> int:
                 metrics["accum_fold_minus_refetch"] = round(
                     balanced["ledger_accumulate"] - balanced["ledger+refetch"], 4
                 )
+            # PRIMARY v1 finding — the OPERATOR-ALGEBRA contrast. Two honest typed
+            # ledgers using IDENTICAL surface parsing differ only in fold (running
+            # total) vs select-latest. On accumulative state, fold is correct and
+            # select-latest (the v0 near-solver, 1.000 there) is catastrophically
+            # wrong. The gap = the entire task. This is the registered headline:
+            # compaction operators must match the state's algebra.
+            if "ledger_accumulate" in balanced and "ledger_state" in balanced:
+                metrics["accum_fold_minus_dedup"] = round(
+                    balanced["ledger_accumulate"] - balanced["ledger_state"], 4
+                )
         # RETRIEVAL-POSITION effect (anomaly test): same content + budget, only
         # the re-insertion slot differs. >0 => placing refetched lines in the
         # most-recent slot (adjacent to query) helps => retrieval ORDER is a
