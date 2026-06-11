@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "CompactionBench: measuring context-rot and recoverable compaction (bet-0003)"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "httpx>=0.28.1",
 ]

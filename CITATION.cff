@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use CompactionBench, please cite this artifact."
+title: "CompactionBench: Context Rot and Recoverable Compaction"
+version: "0.1.0"
+date-released: "2026-06-11"
+abstract: "A seed-frozen exact-match benchmark for measuring context rot, typed-ledger compaction, and lazy re-fetch policies on long agent-style logs."
+authors:
+  - name: "AAD bet-0003 PI"
+keywords:
+  - context compaction
+  - long-context evaluation
+  - agent memory
+  - recoverable compaction
+  - benchmark
+license: "MIT"

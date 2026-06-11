@@ -1,0 +1,52 @@
+{
+  "schema": "compactbench.expected_results.v1",
+  "tolerance": 0.0001,
+  "panels": {
+    "v0_3b": {
+      "model": "qwen2.5:3b-instruct",
+      "protocols": ["p-d816ff49", "p-8e96fc78"],
+      "metrics": {
+        "recoverable_gain_refetch_8": 0.55,
+        "refetch_position_effect": 0.3,
+        "acc_keep_last_k_8_balanced": 0.175,
+        "acc_ledger_refetch_balanced": 0.725,
+        "budgetfrac_ledger_refetch": 0.257
+      }
+    },
+    "v1_3b": {
+      "model": "qwen2.5:3b-instruct",
+      "protocols": ["p-9fd9858e"],
+      "metrics": {
+        "accum_fold_minus_dedup": 0.9958,
+        "accum_recoverable_gain_refetch_8": 0.125,
+        "acc_keep_last_k_8_balanced": 0.0667,
+        "acc_ledger_state_balanced": 0.0042,
+        "acc_ledger_accumulate_balanced": 1.0
+      }
+    },
+    "v0_7b": {
+      "model": "qwen2.5:7b-instruct",
+      "protocols": ["p-3ad438f7", "p-b7a62692"],
+      "metrics": {
+        "recoverable_gain_refetch_8": 0.7833,
+        "refetch_position_effect": 0.1167,
+        "acc_keep_last_k_8_balanced": 0.2,
+        "acc_full_balanced": 0.7625,
+        "acc_ledger_refetch_balanced": 0.9833,
+        "budgetfrac_ledger_refetch": 0.257
+      }
+    },
+    "v1_7b": {
+      "model": "qwen2.5:7b-instruct",
+      "protocols": ["p-8a283782", "p-66c7e90a"],
+      "metrics": {
+        "accum_fold_minus_dedup": 0.9917,
+        "refetch_position_effect": -0.1458,
+        "accum_recoverable_gain_refetch_8": 0.275,
+        "acc_keep_last_k_8_balanced": 0.1625,
+        "acc_ledger_state_balanced": 0.0083,
+        "acc_ledger_accumulate_balanced": 1.0
+      }
+    }
+  }
+}

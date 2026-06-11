@@ -12,8 +12,8 @@
 #   ./reproduce.sh 3b         # only the qwen2.5:3b panels
 #   ./reproduce.sh 7b         # only the qwen2.5:7b panels
 #
-# Per-panel metrics land in results/<panel>.json. Expected headline values
-# (depth-balanced) are listed in FINDINGS.md; key ones echoed at the end.
+# Per-panel metrics land in results/<panel>.json. Expected verified values are
+# listed in EXPECTED_RESULTS.json and checked at the end.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -77,3 +77,6 @@ for panel, keys in KEYS.items():
         tail = f"  (verified: {exp})" if exp is not None else ""
         print(f"{panel:6s} {k:34s} {m.get(k)}{tail}")
 PY
+
+echo "== validating reproduced metrics =="
+uv run --frozen python scripts/validate_results.py --allow-missing

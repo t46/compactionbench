@@ -10,11 +10,15 @@ p-d816ff49, p-8e96fc78, p-9fd9858e; 7b cross-model protocols p-3ad438f7,
 p-b7a62692, p-8a283782, p-66c7e90a).
 
 **Start here:** [`FINDINGS.md`](FINDINGS.md) — paper-style write-up of the four
-mechanistic findings. **Reproduce everything:** `./reproduce.sh` (both models;
-`./reproduce.sh 3b` for the cheap half). **Frozen splits:**
+mechanistic findings. **Publish packet:** [`RELEASE.md`](RELEASE.md). **Reproduce
+everything:** `./reproduce.sh` (both models; `./reproduce.sh 3b` for the cheap
+half). Expected verified metrics live in [`EXPECTED_RESULTS.json`](EXPECTED_RESULTS.json)
+and are checked by `scripts/validate_results.py`. **Frozen splits:**
 `frozen/splits.json` pins SHA256 of every eval cell (the benchmark is
 procedurally generated, so generator+seed+config IS the split);
 `scripts/freeze_splits.py --check` detects any drift.
+
+License: MIT.
 
 ## Task: StatefulQA (v0, `--task stateful`)
 A long "session log" of typed segments (instruction / relevant state / distractors),
