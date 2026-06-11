@@ -206,11 +206,21 @@ def main() -> int:
         base = "keep_last_k:8"
         for pol, mname in (
             ("ledger+refetch", "recoverable_gain_refetch_8"),
+            ("ledger+refetch_inplace", "recoverable_gain_refetch_inplace_8"),
             ("ledger_state", "recoverable_gain_ledger_state_8"),
             ("ledger", "recoverable_gain_ledger_8"),
         ):
             if pol in balanced and base in balanced:
                 metrics[mname] = round(balanced[pol] - balanced[base], 4)
+        # RETRIEVAL-POSITION effect (anomaly test): same content + budget, only
+        # the re-insertion slot differs. >0 => placing refetched lines in the
+        # most-recent slot (adjacent to query) helps => retrieval ORDER is a
+        # first-class compaction lever. ~0 => the refetch win is pure content
+        # recovery, position-independent.
+        if "ledger+refetch" in balanced and "ledger+refetch_inplace" in balanced:
+            metrics["refetch_position_effect"] = round(
+                balanced["ledger+refetch"] - balanced["ledger+refetch_inplace"], 4
+            )
         metrics["n_distractors"] = args.n_distractors
         metrics["n_seeds"] = len(seeds)
         metrics["n_depths"] = len(depths)

@@ -93,12 +93,21 @@ def apply_policy(item: Item, policy: str) -> tuple[list[dict], dict]:
         messages = _assemble(system, kept_texts, query)
         info = _info(policy, kept_texts, messages, system)
         return messages, info
-    elif policy == "ledger+refetch":
+    elif policy in ("ledger+refetch", "ledger+refetch_inplace"):
         # keep_last_k recency window + LAZY RE-FETCH: if the queried target has
         # no assignment in the kept window, pull its assignment lines back from
         # the dropped tail (retrieval keyed on the query, in original order so
         # most-recent-wins is preserved). Measures recoverable compaction vs
         # plain truncation directly.
+        #
+        # Two re-insertion ORDERS, isolating the retrieval-POSITION effect
+        # (anomaly bet-0003-refetch-exceeds-prediction-positional):
+        #   * ledger+refetch         -> refetched lines APPENDED after the window,
+        #     i.e. adjacent to the query (most-recent slot).
+        #   * ledger+refetch_inplace -> refetched lines PREPENDED before the
+        #     window, i.e. at their ORIGINAL relative position (they came from
+        #     the dropped prefix log[:-k], which precedes the window). Same
+        #     content, same budget; only position changes.
         k = 8
         window = log[-k:] if k > 0 else []
         target_name = _target_of(query)
@@ -114,7 +123,10 @@ def apply_policy(item: Item, policy: str) -> tuple[list[dict], dict]:
                 for s in dropped
                 if (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
             ]
-        kept = list(window) + refetched
+        if policy == "ledger+refetch_inplace":
+            kept = refetched + list(window)
+        else:
+            kept = list(window) + refetched
     else:
         raise ValueError(f"unknown policy: {policy}")
 
