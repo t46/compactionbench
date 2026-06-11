@@ -5,8 +5,9 @@ Two task families: **v0 StatefulQA** (answer = most-recent value) and **v1
 AccumulatorQA** (answer = cumulative sum). v1 exists because a most-recent-wins
 ledger dedup near-solves v0 (1.000); v1 makes the answer a total no single line
 holds, so the benchmark discriminates compaction operators by the **state algebra**
-they respect. Four verified results (protocols p-d3c4bf50, p-d816ff49, p-8e96fc78,
-p-9fd9858e).
+they respect. Seven verified results across two models (3b protocols p-d3c4bf50,
+p-d816ff49, p-8e96fc78, p-9fd9858e; 7b cross-model protocols p-3ad438f7,
+p-b7a62692, p-8a283782).
 
 ## Task: StatefulQA (v0, `--task stateful`)
 A long "session log" of typed segments (instruction / relevant state / distractors),
@@ -71,6 +72,27 @@ parsing, fold vs select-latest — on accumulative state fold is correct and
 select-latest (the v0 near-solver) collapses. **The compaction operator must match
 the state's algebra.** budgetfrac = mean prompt-chars / full-context prompt-chars.
 
+## Cross-model robustness (VERIFIED, qwen2.5:7b-instruct, same panels, n_ops=3)
+
+| metric | 3b | 7b | protocol (7b) |
+|---|---|---|---|
+| v0 recoverable_gain_refetch_8 | +0.55 | **+0.78** | p-3ad438f7 |
+| v0 refetch_position_effect | +0.30 | **+0.12** | p-b7a62692 |
+| v1 accum_fold_minus_dedup | +0.996 | **+0.992** | p-8a283782 |
+| v1 accum_recoverable_gain_refetch_8 | +0.125 | +0.275 | (secondary) |
+| v1 refetch_position_effect | −0.03 | −0.146 | (secondary) |
+
+All signs survive scale. Two mechanistic refinements:
+1. **Recovery gains GROW with scale** — truncation's loss is positional/
+   information-theoretic (scale can't fix absent lines: keep_last_k:8 goes
+   0.175 → 0.20), while recovery's loss is selection-error (scale fixes it:
+   ledger+refetch goes 0.725 → 0.983). On 7b, refetch at 26% budget (0.983)
+   **beats full context** (0.763) — compaction + recovery > not compacting.
+2. **The position effect flips sign with task algebra** (+0.12 recency task,
+   −0.146 fold task, both |Δ| ≥ 0.10 on the same model): adjacent-to-query
+   placement helps select-latest queries, hurts aggregate queries that need
+   chronological order. Placement, like the operator, must match the algebra.
+
 ## Run
 ```
 # v0 de-confounded depth panel (protocol p-d816ff49 / p-8e96fc78):
@@ -83,4 +105,7 @@ uv run --frozen python eval.py --task accumulate --n-items 16 --n-ops 3 \
   --policies full,drop_distractors,keep_last_k:8,keep_last_k:16,ledger,ledger_state,ledger+refetch,ledger+refetch_inplace,ledger_accumulate \
   --needle-depths 0,0.25,0.5,0.75,1.0 --base-seeds 1000,2000,3000 --n-distractors 40
 ```
-Requires local ollama with `qwen2.5:3b-instruct`. Metrics → `$AAD_METRICS_PATH`.
+Cross-model (protocols p-3ad438f7 / p-b7a62692 / p-8a283782): same two commands
+with `--model qwen2.5:7b-instruct`. Requires local ollama with
+`qwen2.5:3b-instruct` (and `qwen2.5:7b-instruct` for the cross-model panels).
+Metrics → `$AAD_METRICS_PATH`.
