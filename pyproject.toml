@@ -12,3 +12,8 @@ dependencies = [
 # Standalone uv workspace root — must NOT join the parent (kernel) workspace.
 [tool.uv.workspace]
 members = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

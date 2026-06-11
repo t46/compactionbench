@@ -1,0 +1,16 @@
+name: validate-policy-pr
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check frozen splits
+        run: uv run --frozen python scripts/freeze_splits.py --check
+      - name: Run offline tests
+        run: uv run --frozen python -m pytest tests

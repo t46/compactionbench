@@ -19,6 +19,19 @@ import re
 
 from .tasks.stateful import DISTRACTOR, INSTRUCTION, QUERY, RELEVANT, Item
 
+ORACLE_POLICIES = frozenset({"drop_distractors", "drop_relevant"})
+LEADERBOARD_POLICIES = frozenset(
+    {
+        "full",
+        "ledger",
+        "ledger_state",
+        "ledger+refetch",
+        "ledger+refetch_inplace",
+        "ledger_accumulate",
+        "verbose_instruction",
+    }
+)
+
 # Fixed, terse, COMPLETE instruction used by every compaction policy. Terse but
 # states the rule (most-recent-wins) so the task is well-posed; held constant so
 # we measure compaction, not wording.
