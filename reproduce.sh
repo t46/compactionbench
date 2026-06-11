@@ -18,11 +18,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p results
+UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/aad-uv-cache}"
 
 WHICH="${1:-all}"
 
 echo "== freezing check: generated splits must match frozen/splits.json =="
-uv run --frozen python scripts/freeze_splits.py --check
+env UV_CACHE_DIR="$UV_CACHE_DIR" uv run --frozen python scripts/freeze_splits.py --check
 
 V0_ARGS=(--task stateful --n-items 16 --n-distractors 40
   --policies "full,drop_distractors,keep_last_k:8,keep_last_k:16,ledger,ledger_state,ledger+refetch,ledger+refetch_inplace"
@@ -35,7 +36,7 @@ run_panel() { # name model args...
   local name="$1" model="$2"; shift 2
   echo "== panel: $name (model $model) =="
   AAD_METRICS_PATH="results/${name}.json" \
-    env UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/aad-uv-cache}" \
+    env UV_CACHE_DIR="$UV_CACHE_DIR" \
     uv run --frozen python eval.py --model "$model" "$@"
 }
 
@@ -49,7 +50,7 @@ if [[ "$WHICH" == "all" || "$WHICH" == "7b" ]]; then
 fi
 
 echo "== headline metrics =="
-uv run --frozen python - <<'PY'
+env UV_CACHE_DIR="$UV_CACHE_DIR" uv run --frozen python - <<'PY'
 import json, pathlib
 KEYS = {
     "v0_3b": ["recoverable_gain_refetch_8", "refetch_position_effect"],
@@ -79,4 +80,4 @@ for panel, keys in KEYS.items():
 PY
 
 echo "== validating reproduced metrics =="
-uv run --frozen python scripts/validate_results.py --allow-missing
+env UV_CACHE_DIR="$UV_CACHE_DIR" uv run --frozen python scripts/validate_results.py --allow-missing
