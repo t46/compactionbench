@@ -27,17 +27,23 @@ LEADERBOARD_POLICIES = frozenset(
         "ledger_state",
         "ledger+refetch",
         "ledger+refetch_inplace",
+        "ledger+refetch_algebra",
         "ledger_accumulate",
         "verbose_instruction",
     }
 )
 
-# Fixed, terse, COMPLETE instruction used by every compaction policy. Terse but
-# states the rule (most-recent-wins) so the task is well-posed; held constant so
-# we measure compaction, not wording.
-TERSE_SYSTEM = (
+# Fixed, terse, COMPLETE instructions used by every compaction policy. Terse but
+# task-correct; held constant within a task so we measure compaction, not
+# wording.
+TERSE_STATEFUL_SYSTEM = (
     "Track register values from the log. A register's current value is its most "
     "recent assignment. Answer with only the number."
+)
+TERSE_ACCUMULATE_SYSTEM = (
+    "Track register values from the log. A register's current value is its last "
+    "set value plus later increases minus later decreases. Answer with only the "
+    "number."
 )
 
 # Surface-form matcher for an assignment line ("register X is now 42"). The
@@ -101,7 +107,7 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
     query = next(s.text for s in item.segments if s.kind == QUERY)
     log = [s for s in item.segments if s.kind in (RELEVANT, DISTRACTOR)]
 
-    system = TERSE_SYSTEM
+    system = TERSE_ACCUMULATE_SYSTEM if task == "accumulate" else TERSE_STATEFUL_SYSTEM
     if policy == "full":
         kept = log
     elif policy == "drop_distractors":  # lossless ideal compaction
@@ -110,7 +116,7 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         kept = [s for s in log if s.kind == DISTRACTOR]
     elif policy == "verbose_instruction":  # wording ablation: full log, verbose system
         kept = log
-        system = verbose if verbose is not None else TERSE_SYSTEM
+        system = verbose if verbose is not None else system
     elif policy.startswith("keep_last_k:"):
         k = int(policy.split(":", 1)[1])
         kept = log[-k:] if k > 0 else []
@@ -182,7 +188,7 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         messages = _assemble(system, kept_texts, query)
         info = _info(policy, kept_texts, messages, system)
         return messages, info
-    elif policy in ("ledger+refetch", "ledger+refetch_inplace"):
+    elif policy in ("ledger+refetch", "ledger+refetch_inplace", "ledger+refetch_algebra"):
         # keep_last_k recency window + LAZY RE-FETCH: if the queried target has
         # no assignment in the kept window, pull its assignment lines back from
         # the dropped tail (retrieval keyed on the query, in original order so
@@ -197,6 +203,11 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         #     window, i.e. at their ORIGINAL relative position (they came from
         #     the dropped prefix log[:-k], which precedes the window). Same
         #     content, same budget; only position changes.
+        #   * ledger+refetch_algebra -> task-aware wrapper: append for v0
+        #     select-latest state, chronological in-place for v1 fold state.
+        #     This is a named deployable policy family over the two benchmark
+        #     state algebras, while preserving the primitive policies for
+        #     ablation.
         k = 8
         window = log[-k:] if k > 0 else []
         target_name = _target_of(query)
@@ -227,7 +238,9 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
                     for s in dropped
                     if (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
                 ]
-        if policy == "ledger+refetch_inplace":
+        if policy == "ledger+refetch_inplace" or (
+            policy == "ledger+refetch_algebra" and task == "accumulate"
+        ):
             kept = refetched + list(window)
         else:
             kept = list(window) + refetched
@@ -249,5 +262,5 @@ def _info(policy: str, kept_texts: list[str], messages: list[dict], system: str)
         "policy": policy,
         "kept_lines": len(kept_texts),
         "prompt_chars": user_chars,
-        "system_is_verbose": system != TERSE_SYSTEM,
+        "system_is_verbose": system not in (TERSE_STATEFUL_SYSTEM, TERSE_ACCUMULATE_SYSTEM),
     }

@@ -4,6 +4,29 @@
 checkouts unless marked otherwise. Protocols/runs in parentheses; splits frozen
 in `frozen/splits.json`; reproduce everything with `./reproduce.sh`.*
 
+## 2026-06-13 3B update
+
+bet-0008 re-ran the frozen 3B panels in this checkout and verified the
+precondition ordering with Qwen2.5-3B-Instruct: `ledger+refetch` 0.725 >
+`full` 0.2708 > `keep_last_k:8` 0.175 on StatefulQA
+(`recoverable_gain_refetch_8 = +0.55`, protocol p-6abf2f5e,
+run r-04e3816f2b, exact clean-checkout verification).
+
+The AccumulatorQA policy surface now uses a task-correct terse instruction:
+"last set value plus later increases minus later decreases." Under that
+corrected surface, chronological refetch is the strongest conservative v1
+policy: `ledger+refetch_inplace` 0.3417 > appended `ledger+refetch` 0.2792 >
+`full` 0.1292 > `keep_last_k:8` 0.0958. The verified primary was
+`recoverable_gain_refetch_inplace_8 = +0.2458`, reproduced within tolerance
+0.01 by protocol p-b1c6166f / run r-8a779662f0.
+
+The first small policy-family extension is `ledger+refetch_algebra`: append
+refetched lines for select-latest state, preserve chronological in-place order
+for accumulative state. Its paired 3B primary,
+`algebra_refetch_mean_gain_8`, was +0.3917 at mean budget fraction 0.2402
+(protocol p-f5a44444 / run r-8b372b694c; verification reproduced 0.3896
+within tolerance 0.03).
+
 ## Abstract
 
 Long-running agents degrade as context fills ("context rot"), and production
@@ -160,3 +183,6 @@ prediction, not a verified claim.
 | 6 | adjacency placement gain (v0) | refetch_position_effect | +0.1167 | p-b7a62692 | 7b |
 | 7 | fold vs dedup (v1) | accum_fold_minus_dedup | +0.9917 | p-8a283782 | 7b |
 | 8 | adjacency *hurts* accumulate (v1) | refetch_position_effect | −0.1458 | p-66c7e90a | 7b |
+| 9 | 3B precondition replication | recoverable_gain_refetch_8 | +0.55 | p-6abf2f5e | 3b |
+| 10 | corrected v1 recoverable frontier | recoverable_gain_refetch_inplace_8 | +0.2458 | p-b1c6166f | 3b |
+| 11 | algebra-aware refetch policy family | algebra_refetch_mean_gain_8 | +0.3917 | p-f5a44444 | 3b |

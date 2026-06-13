@@ -18,6 +18,32 @@ and are checked by `scripts/validate_results.py`. **Frozen splits:**
 procedurally generated, so generator+seed+config IS the split);
 `scripts/freeze_splits.py --check` detects any drift.
 
+## 2026-06-13 3B replication and algebra-aware refetch update
+
+Independent clean-checkout verification on this checkout reproduced the 3B
+CompactionBench ordering at Qwen2.5-3B-Instruct: recoverable compaction still
+dominates both full context and truncation on StatefulQA, and the corrected
+AccumulatorQA instruction surface preserves the algebra result.
+
+| panel | policy / metric | acc or gain | budgetfrac | protocol / run |
+|---|---|---:|---:|---|
+| v0 StatefulQA | full | 0.2708 | 1.000 | p-6abf2f5e / r-04e3816f2b |
+| v0 StatefulQA | keep_last_k:8 | 0.1750 | 0.2135 | p-6abf2f5e / r-04e3816f2b |
+| v0 StatefulQA | ledger+refetch | 0.7250 | 0.2570 | p-6abf2f5e / r-04e3816f2b |
+| v0 StatefulQA | recoverable_gain_refetch_8 | +0.5500 |  | verified exact |
+| v1 AccumulatorQA | keep_last_k:8 | 0.0958 | 0.1973 | p-b1c6166f / r-8a779662f0 |
+| v1 AccumulatorQA | ledger+refetch | 0.2792 | 0.2233 | p-b1c6166f / r-8a779662f0 |
+| v1 AccumulatorQA | ledger+refetch_inplace | 0.3417 | 0.2233 | p-b1c6166f / r-8a779662f0 |
+| v1 AccumulatorQA | ledger_accumulate | 0.9542 | 0.1339 | p-b1c6166f / r-8a779662f0 |
+| v1 AccumulatorQA | recoverable_gain_refetch_inplace_8 | +0.2458 |  | verified within 0.01 |
+| paired v0/v1 | ledger+refetch_algebra mean gain | +0.3917 | 0.2402 | p-f5a44444 / r-8b372b694c |
+
+`ledger+refetch_algebra` is a small policy-family wrapper: it appends refetched
+lines adjacent to the query for select-latest state, and preserves chronological
+in-place order for accumulative state. The verified primary metric is
+`algebra_refetch_mean_gain_8`; clean-checkout verification reproduced 0.3896
+within tolerance 0.03 vs the claimed 0.3917.
+
 License: MIT.
 
 ## Task: StatefulQA (v0, `--task stateful`)
@@ -53,6 +79,10 @@ ONLY — never read `kind`/`is_answer`):
 - `ledger+refetch` — `keep_last_k:8` + lazy re-fetch of the queried target's lines
   from the dropped tail (recoverable compaction; conservative — model still picks recency).
   On v1 it recovers ALL target ops (completeness), not just one.
+- `ledger+refetch_inplace` — same recovered content as `ledger+refetch`, but
+  restored before the retained recency window, preserving chronological order.
+- `ledger+refetch_algebra` — task-aware wrapper: appended refetch for v0
+  select-latest state, chronological in-place refetch for v1 fold state.
 - `ledger_accumulate` (v1) — fold every op per register (set re-bases, inc/dec adjust)
   into a running total. Correct operator for accumulative state; computes the answer
   in-compactor, so reported as the OPERATOR-correctness ceiling, not a model win.
@@ -69,21 +99,25 @@ ONLY — never read `kind`/`is_answer`):
 (protocol p-8e96fc78): re-injecting recovered facts adjacent to the query beats
 original-position by 30pp at identical content/budget.
 
-## v1 headline (VERIFIED, protocol p-9fd9858e, qwen2.5:3b, depth-balanced)
+## v1 headline (VERIFIED, protocol p-b1c6166f, qwen2.5:3b, depth-balanced)
 | policy | acc | budgetfrac | note |
 |---|---|---|---|
-| keep_last_k:8 (incumbent) | 0.067 | 0.197 | truncation |
-| **ledger_state (select-latest)** | **0.004** | 0.152 | v0 near-solver — DEAD on v1 |
-| ledger+refetch (recover all ops) | 0.192 | 0.223 | conservative recovery, beats truncation |
-| drop_distractors (cheating ideal) | 0.542 | 0.071 | model-does-math ceiling |
-| **ledger_accumulate (fold)** | **1.000** | 0.134 | correct operator |
+| keep_last_k:8 (incumbent) | 0.096 | 0.197 | truncation |
+| **ledger_state (select-latest)** | **0.008** | 0.152 | v0 near-solver — DEAD on v1 |
+| ledger+refetch (recover all ops, appended) | 0.279 | 0.223 | conservative recovery, beats truncation |
+| ledger+refetch_inplace (chronological) | 0.342 | 0.223 | best conservative v1 placement |
+| **ledger_accumulate (fold)** | **0.954** | 0.134 | correct operator ceiling |
 
-`accum_fold_minus_dedup = +0.9958` (verified): two honest typed ledgers, identical
+`accum_fold_minus_dedup = +0.9458` (verified): two honest typed ledgers, identical
 parsing, fold vs select-latest — on accumulative state fold is correct and
 select-latest (the v0 near-solver) collapses. **The compaction operator must match
 the state's algebra.** budgetfrac = mean prompt-chars / full-context prompt-chars.
 
-## Cross-model robustness (VERIFIED, qwen2.5:7b-instruct, same panels, n_ops=3)
+## Prior cross-model robustness (VERIFIED, qwen2.5:7b-instruct, same panels, n_ops=3)
+
+These 7B numbers are prior verified evidence from the original release. The
+current `EXPECTED_RESULTS.json` fixture is scoped to the 3B bet-0008 update
+above, because the v1 task instruction was corrected in this checkout.
 
 | metric | 3b | 7b | protocol (7b) |
 |---|---|---|---|
@@ -106,17 +140,18 @@ All signs survive scale. Two mechanistic refinements:
 
 ## Run
 ```
-# v0 de-confounded depth panel (protocol p-d816ff49 / p-8e96fc78):
+# v0 de-confounded depth panel (protocol p-6abf2f5e):
 uv run --frozen python eval.py --n-items 16 \
   --policies full,drop_distractors,keep_last_k:8,keep_last_k:16,ledger,ledger_state,ledger+refetch,ledger+refetch_inplace \
   --needle-depths 0,0.25,0.5,0.75,1.0 --base-seeds 1000,2000,3000 --n-distractors 40
 
-# v1 accumulative panel (protocol p-9fd9858e):
+# v1 accumulative panel (protocol p-b1c6166f):
 uv run --frozen python eval.py --task accumulate --n-items 16 --n-ops 3 \
   --policies full,drop_distractors,keep_last_k:8,keep_last_k:16,ledger,ledger_state,ledger+refetch,ledger+refetch_inplace,ledger_accumulate \
   --needle-depths 0,0.25,0.5,0.75,1.0 --base-seeds 1000,2000,3000 --n-distractors 40
+
+# algebra-aware paired 3B panel (protocol p-f5a44444):
+./scripts/run_algebra_refetch_3b.sh
 ```
-Cross-model (protocols p-3ad438f7 / p-b7a62692 / p-8a283782 / p-66c7e90a):
-same two commands with `--model qwen2.5:7b-instruct`. Requires local ollama with
-`qwen2.5:3b-instruct` (and `qwen2.5:7b-instruct` for the cross-model panels).
-Metrics → `$AAD_METRICS_PATH`.
+Requires local ollama with `qwen2.5:3b-instruct`. Metrics →
+`$AAD_METRICS_PATH`.
