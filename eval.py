@@ -228,6 +228,7 @@ def main() -> int:
             ("ledger_state", "recoverable_gain_ledger_state_8"),
             ("ledger", "recoverable_gain_ledger_8"),
             ("ledger_accumulate", "recoverable_gain_ledger_accumulate_8"),
+            ("ledger+refetch_algebra", "recoverable_gain_refetch_algebra_8"),
         ):
             if pol in balanced and base in balanced:
                 metrics[mname] = round(balanced[pol] - balanced[base], 4)
@@ -239,6 +240,10 @@ def main() -> int:
             if "ledger+refetch" in balanced and base in balanced:
                 metrics["accum_recoverable_gain_refetch_8"] = round(
                     balanced["ledger+refetch"] - balanced[base], 4
+                )
+            if "ledger+refetch_algebra" in balanced and base in balanced:
+                metrics["accum_recoverable_gain_refetch_algebra_8"] = round(
+                    balanced["ledger+refetch_algebra"] - balanced[base], 4
                 )
             if "ledger_state" in balanced and base in balanced:
                 metrics["accum_dedup_penalty_vs_truncation"] = round(

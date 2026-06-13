@@ -188,7 +188,7 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         messages = _assemble(system, kept_texts, query)
         info = _info(policy, kept_texts, messages, system)
         return messages, info
-    elif policy in ("ledger+refetch", "ledger+refetch_inplace"):
+    elif policy in ("ledger+refetch", "ledger+refetch_inplace", "ledger+refetch_algebra"):
         # keep_last_k recency window + LAZY RE-FETCH: if the queried target has
         # no assignment in the kept window, pull its assignment lines back from
         # the dropped tail (retrieval keyed on the query, in original order so
@@ -203,6 +203,11 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         #     window, i.e. at their ORIGINAL relative position (they came from
         #     the dropped prefix log[:-k], which precedes the window). Same
         #     content, same budget; only position changes.
+        #   * ledger+refetch_algebra -> task-aware wrapper: append for v0
+        #     select-latest state, chronological in-place for v1 fold state.
+        #     This is a named deployable policy family over the two benchmark
+        #     state algebras, while preserving the primitive policies for
+        #     ablation.
         k = 8
         window = log[-k:] if k > 0 else []
         target_name = _target_of(query)
@@ -233,7 +238,9 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
                     for s in dropped
                     if (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
                 ]
-        if policy == "ledger+refetch_inplace":
+        if policy == "ledger+refetch_inplace" or (
+            policy == "ledger+refetch_algebra" and task == "accumulate"
+        ):
             kept = refetched + list(window)
         else:
             kept = list(window) + refetched
