@@ -46,6 +46,24 @@
         "accumulate_acc_ledger_refetch_algebra_balanced": 0.3292,
         "accumulate_budgetfrac_ledger_refetch_algebra": 0.2233
       }
+    },
+    "refetch_k4_3b": {
+      "model": "qwen2.5:3b-instruct",
+      "protocols": ["p-b37160f8"],
+      "tolerance": 0.03,
+      "metrics": {
+        "k4_algebra_refetch_mean_gain_vs_trunc": 0.4292,
+        "k4_algebra_refetch_min_gain_vs_trunc": 0.3083,
+        "k4_algebra_refetch_budgetfrac_mean": 0.1527,
+        "stateful_acc_keep_last_k_4_balanced": 0.2,
+        "stateful_acc_ledger_refetch_algebra_4_balanced": 0.75,
+        "stateful_budgetfrac_keep_last_k_4": 0.1196,
+        "stateful_budgetfrac_ledger_refetch_algebra_4": 0.1631,
+        "accumulate_acc_keep_last_k_4_balanced": 0.125,
+        "accumulate_acc_ledger_refetch_algebra_4_balanced": 0.4333,
+        "accumulate_budgetfrac_keep_last_k_4": 0.1118,
+        "accumulate_budgetfrac_ledger_refetch_algebra_4": 0.1424
+      }
     }
   }
 }

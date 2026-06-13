@@ -93,6 +93,17 @@ def _assemble(system: str, log_texts: list[str], query_text: str) -> list[dict]:
     ]
 
 
+def _split_refetch_policy(policy: str) -> tuple[str, int] | None:
+    """Parse ledger+refetch policy names, with optional ':K' budget suffix."""
+    for base in ("ledger+refetch_algebra", "ledger+refetch_inplace", "ledger+refetch"):
+        if policy == base:
+            return base, 8
+        prefix = f"{base}:"
+        if policy.startswith(prefix):
+            return base, int(policy.split(":", 1)[1])
+    return None
+
+
 def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[dict], dict]:
     """Return (messages, info). `policy` is a name, optionally 'keep_last_k:K'.
 
@@ -188,7 +199,7 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         messages = _assemble(system, kept_texts, query)
         info = _info(policy, kept_texts, messages, system)
         return messages, info
-    elif policy in ("ledger+refetch", "ledger+refetch_inplace", "ledger+refetch_algebra"):
+    elif refetch_cfg := _split_refetch_policy(policy):
         # keep_last_k recency window + LAZY RE-FETCH: if the queried target has
         # no assignment in the kept window, pull its assignment lines back from
         # the dropped tail (retrieval keyed on the query, in original order so
@@ -208,7 +219,7 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
         #     This is a named deployable policy family over the two benchmark
         #     state algebras, while preserving the primitive policies for
         #     ablation.
-        k = 8
+        refetch_policy, k = refetch_cfg
         window = log[-k:] if k > 0 else []
         target_name = _target_of(query)
         dropped = log[:-k] if k > 0 else log
@@ -238,8 +249,8 @@ def apply_policy(item: Item, policy: str, task: str = "stateful") -> tuple[list[
                     for s in dropped
                     if (m := ASSIGN_RE.search(s.text)) and m.group(1) == target_name
                 ]
-        if policy == "ledger+refetch_inplace" or (
-            policy == "ledger+refetch_algebra" and task == "accumulate"
+        if refetch_policy == "ledger+refetch_inplace" or (
+            refetch_policy == "ledger+refetch_algebra" and task == "accumulate"
         ):
             kept = refetched + list(window)
         else:

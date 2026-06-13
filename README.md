@@ -37,12 +37,18 @@ AccumulatorQA instruction surface preserves the algebra result.
 | v1 AccumulatorQA | ledger_accumulate | 0.9542 | 0.1339 | p-b1c6166f / r-8a779662f0 |
 | v1 AccumulatorQA | recoverable_gain_refetch_inplace_8 | +0.2458 |  | verified within 0.01 |
 | paired v0/v1 | ledger+refetch_algebra mean gain | +0.3917 | 0.2402 | p-f5a44444 / r-8b372b694c |
+| paired v0/v1 | ledger+refetch_algebra:4 mean gain vs k=4 truncation | +0.4292 | 0.1527 | p-b37160f8 / r-6633ecbea2 |
 
 `ledger+refetch_algebra` is a small policy-family wrapper: it appends refetched
 lines adjacent to the query for select-latest state, and preserves chronological
 in-place order for accumulative state. The verified primary metric is
 `algebra_refetch_mean_gain_8`; clean-checkout verification reproduced 0.3896
 within tolerance 0.03 vs the claimed 0.3917.
+
+The low-budget frontier point is `ledger+refetch_algebra:4`: at mean budget
+fraction 0.1527, it beats matched `keep_last_k:4` by +0.4292 mean gain
+(StatefulQA +0.5500; AccumulatorQA +0.3083). Clean-checkout verification
+reproduced the primary exactly within tolerance 0.03.
 
 License: MIT.
 
@@ -83,6 +89,8 @@ ONLY — never read `kind`/`is_answer`):
   restored before the retained recency window, preserving chronological order.
 - `ledger+refetch_algebra` — task-aware wrapper: appended refetch for v0
   select-latest state, chronological in-place refetch for v1 fold state.
+  It accepts an optional suffix such as `ledger+refetch_algebra:4` to set the
+  retained recency window.
 - `ledger_accumulate` (v1) — fold every op per register (set re-bases, inc/dec adjust)
   into a running total. Correct operator for accumulative state; computes the answer
   in-compactor, so reported as the OPERATOR-correctness ceiling, not a model win.
@@ -152,6 +160,9 @@ uv run --frozen python eval.py --task accumulate --n-items 16 --n-ops 3 \
 
 # algebra-aware paired 3B panel (protocol p-f5a44444):
 ./scripts/run_algebra_refetch_3b.sh
+
+# low-budget k=4 algebra-aware paired 3B panel (protocol p-b37160f8):
+./scripts/run_refetch_k4_3b.sh
 ```
 Requires local ollama with `qwen2.5:3b-instruct`. Metrics →
 `$AAD_METRICS_PATH`.

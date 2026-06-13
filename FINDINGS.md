@@ -27,6 +27,12 @@ for accumulative state. Its paired 3B primary,
 (protocol p-f5a44444 / run r-8b372b694c; verification reproduced 0.3896
 within tolerance 0.03).
 
+A follow-up budget point tightened the frontier: `ledger+refetch_algebra:4`
+beats matched `keep_last_k:4` by +0.4292 mean gain at mean budget fraction
+0.1527 (StatefulQA +0.5500 at 0.1631 budget; AccumulatorQA +0.3083 at 0.1424
+budget). This was protocol p-b37160f8 / run r-6633ecbea2; clean-checkout
+verification reproduced the primary exactly within tolerance 0.03.
+
 ## Abstract
 
 Long-running agents degrade as context fills ("context rot"), and production
@@ -186,3 +192,4 @@ prediction, not a verified claim.
 | 9 | 3B precondition replication | recoverable_gain_refetch_8 | +0.55 | p-6abf2f5e | 3b |
 | 10 | corrected v1 recoverable frontier | recoverable_gain_refetch_inplace_8 | +0.2458 | p-b1c6166f | 3b |
 | 11 | algebra-aware refetch policy family | algebra_refetch_mean_gain_8 | +0.3917 | p-f5a44444 | 3b |
+| 12 | low-budget algebra-aware refetch frontier | k4_algebra_refetch_mean_gain_vs_trunc | +0.4292 | p-b37160f8 | 3b |
