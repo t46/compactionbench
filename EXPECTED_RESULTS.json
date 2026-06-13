@@ -4,10 +4,10 @@
   "panels": {
     "v0_3b": {
       "model": "qwen2.5:3b-instruct",
-      "protocols": ["p-d816ff49", "p-8e96fc78"],
+      "protocols": ["p-6abf2f5e", "p-f5a44444"],
       "metrics": {
         "recoverable_gain_refetch_8": 0.55,
-        "refetch_position_effect": 0.3,
+        "acc_full_balanced": 0.2708,
         "acc_keep_last_k_8_balanced": 0.175,
         "acc_ledger_refetch_balanced": 0.725,
         "budgetfrac_ledger_refetch": 0.257
@@ -15,37 +15,36 @@
     },
     "v1_3b": {
       "model": "qwen2.5:3b-instruct",
-      "protocols": ["p-9fd9858e"],
+      "protocols": ["p-b1c6166f"],
+      "tolerance": 0.01,
       "metrics": {
-        "accum_fold_minus_dedup": 0.9958,
-        "accum_recoverable_gain_refetch_8": 0.125,
-        "acc_keep_last_k_8_balanced": 0.0667,
-        "acc_ledger_state_balanced": 0.0042,
-        "acc_ledger_accumulate_balanced": 1.0
-      }
-    },
-    "v0_7b": {
-      "model": "qwen2.5:7b-instruct",
-      "protocols": ["p-3ad438f7", "p-b7a62692"],
-      "metrics": {
-        "recoverable_gain_refetch_8": 0.7833,
-        "refetch_position_effect": 0.1167,
-        "acc_keep_last_k_8_balanced": 0.2,
-        "acc_full_balanced": 0.7625,
-        "acc_ledger_refetch_balanced": 0.9833,
-        "budgetfrac_ledger_refetch": 0.257
-      }
-    },
-    "v1_7b": {
-      "model": "qwen2.5:7b-instruct",
-      "protocols": ["p-8a283782", "p-66c7e90a"],
-      "metrics": {
-        "accum_fold_minus_dedup": 0.9917,
-        "refetch_position_effect": -0.1458,
-        "accum_recoverable_gain_refetch_8": 0.275,
-        "acc_keep_last_k_8_balanced": 0.1625,
+        "recoverable_gain_refetch_8": 0.1833,
+        "recoverable_gain_refetch_inplace_8": 0.2458,
+        "accum_fold_minus_dedup": 0.9458,
+        "acc_full_balanced": 0.1292,
+        "acc_keep_last_k_8_balanced": 0.0958,
+        "acc_ledger_refetch_balanced": 0.2792,
+        "acc_ledger_refetch_inplace_balanced": 0.3417,
         "acc_ledger_state_balanced": 0.0083,
-        "acc_ledger_accumulate_balanced": 1.0
+        "acc_ledger_accumulate_balanced": 0.9542,
+        "budgetfrac_ledger_refetch_inplace": 0.2233
+      }
+    },
+    "algebra_refetch_3b": {
+      "model": "qwen2.5:3b-instruct",
+      "protocols": ["p-f5a44444"],
+      "tolerance": 0.03,
+      "metrics": {
+        "algebra_refetch_mean_gain_8": 0.3917,
+        "algebra_refetch_min_gain_8": 0.2333,
+        "algebra_refetch_budgetfrac_mean": 0.2402,
+        "stateful_recoverable_gain_refetch_algebra_8": 0.55,
+        "stateful_refetch_position_effect": 0.3,
+        "stateful_acc_ledger_refetch_algebra_balanced": 0.725,
+        "stateful_budgetfrac_ledger_refetch_algebra": 0.257,
+        "accumulate_recoverable_gain_refetch_algebra_8": 0.2333,
+        "accumulate_acc_ledger_refetch_algebra_balanced": 0.3292,
+        "accumulate_budgetfrac_ledger_refetch_algebra": 0.2233
       }
     }
   }

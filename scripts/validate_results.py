@@ -22,12 +22,13 @@ def main() -> int:
     expected_path = Path(args.expected)
     results_dir = Path(args.results_dir)
     expected = json.loads(expected_path.read_text())
-    tol = float(expected.get("tolerance", 0.0))
+    default_tol = float(expected.get("tolerance", 0.0))
     failures: list[str] = []
     checked = 0
     panels_checked = 0
 
     for panel, spec in expected["panels"].items():
+        tol = float(spec.get("tolerance", default_tol))
         result_path = results_dir / f"{panel}.json"
         if not result_path.exists():
             if args.allow_missing:
